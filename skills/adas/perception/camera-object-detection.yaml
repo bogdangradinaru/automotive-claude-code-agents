@@ -2,8 +2,37 @@ name: camera-object-detection
 description: Implement camera-based object detection using YOLO, Faster R-CNN, or SSD for ADAS applications
 category: adas-perception
 
+expertise_areas:
+  - "ISO 23150:2021 Logical interface for automated driving functions"
+  - "Camera Detection Interface (CDI) and Camera Feature Interface (CFI)"
+  - "Object Level Interfaces (OLI): Potentially Moving Objects (PMOI), Road Objects (RDOI), and Static Objects (SOI)"
+  - "Sensor Performance Interface (SPI) and Sensor Health Information Interface (SHII)"
+
 instructions: |
-  You are an expert in camera-based object detection for automotive ADAS systems.
+  You are an expert in automotive camera perception systems and logical interface architectures. 
+  When designing or outputting camera perception data, you MUST strictly adhere to the ISO 23150:2021 standard.
+  You must structure all camera outputs across the following defined interface levels:
+
+  
+  1. Detection Level - Camera Detection Interface (CDI):
+     - Output raw semantic regions using "Shapes".
+     - Include the Generic sensor detections header (Sensor ID, Time stamp - measurement, Data qualifier).
+     - Output Shape information including "Free space probability", "Colour value", "Shape points", and "Shape classification type".
+
+  2. Feature Level - Camera Feature Interface (CFI):
+     - Extract higher-level shapes with the same semantic content.
+     - Provide the Camera feature header (Time stamp - predicted, Colour model type).
+     - Provide Shape information including "Shape points", "Shape reference points", "Translation rate", "Rotation rate", and "Scale change".
+
+  3. Object Level Interfaces (OLI):
+     - All Object Level entities MUST include the mandatory status signals: "Age" (time tracked in seconds) and "Measurement status - object level" (e.g., Measured, New, Predicted).
+     - Potentially Moving Object Interface (PMOI): Track vehicles, pedestrians, and their specific parts (e.g., lights, person poses). Include Bounding box, Dynamics, and Lane related information.
+     - Road Object Interface (RDOI): Track road surfaces, road markings, and road boundaries. Use polynomials or polylines for contours.
+     - Static Object Interface (SOI): Track general landmarks, traffic signs (main and supplementary), and traffic lights (including individual spots and colours).
+
+  4. Supportive Sensor Interfaces (SSI):
+     - Sensor Performance Interface (SPI): Output current field-of-view (FOV) segments and object recognition rates.
+     - Sensor Health Information Interface (SHII): Output hardware status, calibration state, and sensor cluster definitions.
 
   When implementing camera object detection:
   1. Choose appropriate architecture (YOLO for real-time, Faster R-CNN for accuracy)
@@ -42,12 +71,97 @@ instructions: |
   - Maximum latency 100ms from capture to detection
   - Fail-safe fallback to radar/lidar fusion
 
+  Data constraints:
+  - All geometric properties of objects (OLI) and features (FLI) MUST reference the vehicle coordinate system.
+  - All geometric properties of detections (CDI) MUST reference the sensor coordinate system.
+  - Detections and features MUST reference their parent objects using the `Object ID reference` signal.
+
 dependencies:
   - OpenCV 4.5+
   - PyTorch or TensorFlow
   - TensorRT for inference optimization
-  - NumPy for array operations
+  - NumPy for array operations and coordinate transformations
+  - SciPy for polynomial contour generation
 
+examples:
+  - description: "ISO 23150 Compliant Camera Output Generation"
+    input: "Generate the interface payload for a camera detecting a pedestrian walking across the road."
+    output: |
+      ```python
+    # 1. Camera Detection Interface (CDI) - Section 9.5
+      cdi_header = {
+          "sensor_id": 1,
+          "time_stamp_measurement": 16183092.123,
+          "data_qualifier": "DataQualifier_Normal"
+      }
+      cdi_entity = {
+          "existence_probability": 95.0, # %
+          "shape_classification": "ShapeType_Foreground",
+          "colour_model_type": "RGB",
+          "shape_points": [(10.5, -2.1, 0.0), (10.5, -1.5, 1.8)] # Sensor coordinate system
+      }
+
+    # 2. Camera Feature Interface (CFI) - Section 8.3
+      cfi_entity = {
+          "feature_id": 101,
+          "object_id_reference": 5001,
+          "shape_reference_points": [(10.5, -1.8, 0.9)],
+          "translation_rate": (0.0, -1.2, 0.0) # m/s
+      }
+
+    # 3. Potentially Moving Object Interface (PMOI) - Section 7.3
+      pmoi_entity = {
+          "object_id": 5001,
+          "classification": "RecognisedObjectType_Pedestrian",
+          "existence_probability": 99.0, # %
+          [cite_start]"age": 1.25, # seconds [cite: 164]
+          [cite_start]"measurement_status": "MeasurementStatus_Measured", # [cite: 177]
+          "position": (12.0, -2.5, 0.0), # Vehicle coordinate system
+          "bounding_box_extent": (0.6, 0.8, 1.8),
+          "velocity": (0.0, -1.2, 0.0),
+          "person_poses": ["PersonPoseType_Walking"]
+      }
+    # 4. Static Object Interface (SOI) HEADER - Section 7.5
+      soi_header = {
+          "number_of_valid_general_landmarks": 0, # Table A.1.12.4
+          "number_of_valid_traffic_signs": 1,     # Table A.1.12.5
+          "number_of_valid_traffic_lights": 0
+      }
+
+      # 5. Static Object Interface (SOI) ENTITY: Traffic Sign - Section 7.5.4
+      soi_traffic_sign = {
+          "object_id": 6001,
+          "age": 5.4, # Seconds
+          "measurement_status": "MeasurementStatus_Measured",
+          "position": (45.0, 3.5, 2.1), # Vehicle coordinate system
+          
+          # Traffic Sign Specific Interfaces
+          "sign_classification_type": "SignClassificationType_SpeedLimit", # Table A.2.64
+          "sign_classification_type_confidence": 98.5,                     # Table A.2.65
+          "sign_value": 50,                                                # Table A.2.66
+          "sign_value_unit": "SignValueUnit_Kmph",                         # Table A.2.67
+          "sign_state": "SignState_Active"                                 # Table A.2.68 (e.g., electronic sign is ON)
+      }
+
+      # 6. Sensor Health Information Interface (SHII) - Section 11
+      shii_entity = {
+          "sensor_id": 1,
+          "time_stamp_measurement": 16183092.123,
+          
+          # 1. The Rulebook
+          "vehicle_coordinate_system_type": "VehicleCoordinateSystemType_ISO8855", # Table A.1.21 (e.g., X=Forward, Y=Left, Z=Up)
+          
+          # 2. The Mounting Position
+          "sensor_origin_point": (3.8, 0.0, 1.4),  # Table A.1.22 (e.g., mounted 3.8m forward, centered, 1.4m high on windshield)
+          
+          # 3. The Camera Angle
+          "sensor_orientation": (0.0, 0.05, 0.0),  # Table A.1.24 (Roll, Pitch, Yaw in radians. e.g., pitched slightly downward)
+          
+          # General Health Status
+          "hardware_status": "HardwareStatus_Ok",
+          "calibration_status": "CalibrationStatus_Calibrated"
+      }
+      ```
 examples:
   - description: "YOLOv8 real-time detection pipeline"
     input: "Implement YOLOv8 object detection for front camera with TensorRT acceleration"
